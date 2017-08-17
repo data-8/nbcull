@@ -8,5 +8,5 @@ def _jupyter_server_extension_paths():
 
 
 def load_jupyter_server_extension(nbapp):
-    culler = Culler(nbapp.config)
+    culler = Culler(nbapp)
     culler.start()

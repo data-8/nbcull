@@ -1,4 +1,10 @@
 import logging
+import json
+from notebook.notebookapp import list_running_servers
+from notebook._tz import utcnow
+from datetime import datetime
+from tornado.httpclient import AsyncHTTPClient
+from notebook.utils import url_path_join
 from tornado.ioloop import PeriodicCallback, IOLoop
 from traitlets.config.configurable import Configurable, Config
 from traitlets import Float
@@ -24,10 +30,17 @@ class Culler(Configurable):
         Time until the extension shuts the notebook down due to inactivity.
     """)
 
-    def __init__(self, nbapp_config=None):
-        self._init_config(nbapp_config)
+    def __init__(self, nbapp=None):
+        self._nbapp = nbapp
+        if nbapp:
+            self._init_config(nbapp.config)
+        else:
+            self._init_config()
         self._init_periodic_callback()
-        self._time_inactive = 0
+        self._server = None
+        self._is_user_active = True
+        self._url = None
+        self._is_updating_flag = False
 
     def _init_config(self, nbapp_config=None):
         c = Config()
@@ -37,10 +50,19 @@ class Culler(Configurable):
         c.merge(nbcull_config)
         self.update_config(c)
 
+    def _init_url(self):
+        self._server = self._get_current_running_server()
+        if self._server is not None:
+            self._url = url_path_join(
+                self._server['url'],
+                self._server['base_url'],
+                '/api/status'
+            )
+            logger.info("URL: {}".format(self._url))
+
     def start(self):
         if self._periodic_callback:
             self._periodic_callback.start()
-            IOLoop.current().start()
             logger.info('Started runner loop')
         else:
             logger.info('Did not start loop: No periodic callback exists.')
@@ -55,25 +77,58 @@ class Culler(Configurable):
     def is_running(self):
         return self._periodic_callback and self._periodic_callback.is_running()
 
-    def _user_is_active(self):
-        return False
+    def _check_activity(self):
+        if self._is_user_active:
+            logger.info("User is still active...")
+        else:
+            self._shut_down_notebook()
+
+    def _update_activity_flag(self):
+        if self._is_updating_flag:
+            return
+        else:
+            self._is_updating_flag = True
+
+        def _command_wrapper(response):
+            logger.info("Checking if user is active...")
+            last_activity = datetime.strptime(
+                json.loads(response.body)['last_activity'],
+                '%Y-%m-%dT%H:%M:%S.%fZ'
+            )
+            current_time = utcnow().replace(tzinfo=None)
+            seconds_since_last_activity = (current_time - last_activity).total_seconds()
+            logger.info("User has been inactive for {} seconds.".format(seconds_since_last_activity))
+            self._is_user_active = seconds_since_last_activity < self.allowed_inactive_time
+            self._is_updating_flag = False
+
+        AsyncHTTPClient().fetch(
+            self._url,
+            _command_wrapper,
+            headers={
+                'Authorization': 'Token ' + self._server['token']
+            }
+        )
+
+    def _get_current_running_server(self):
+        try:
+            return next(list_running_servers())
+        except:
+            logger.info("There are no running servers")
+            return None
 
     def _shut_down_notebook(self):
+        self._nbapp.stop()
         logger.info("Shutting down notebook...")
 
-    def _should_shutdown(self):
-        return self._time_inactive >= self.allowed_inactive_time
-
     def _init_periodic_callback(self):
+        self._periodic_callback = None
+
         def _command_wrapper():
-            if not self._user_is_active():
-                self._time_inactive += self.periodic_time_interval
-                if self._should_shutdown():
-                    self._shut_down_notebook()
-                logger.info("User is not active. Total time inactive: {} sec".format(self._time_inactive))
+            if self._url is not None:
+                self._update_activity_flag()
+                self._check_activity()
             else:
-                self._time_inactive = 0
-                logger.info("User is active")
+                self._init_url()
 
         time_interval = self._seconds_to_milliseconds(self.periodic_time_interval)
 
