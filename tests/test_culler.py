@@ -2,6 +2,7 @@ import os
 import subprocess
 import time
 import datetime
+from notebook.notebookapp import list_running_servers
 from notebook._tz import utcnow
 from threading import Thread
 from nbcull.culler import Culler, logger
@@ -175,8 +176,13 @@ c.Culler.allowed_inactive_time = 5"""
             'jupyter-notebook',
             '--debug',
             '--no-browser'])
-        # Sleep so that notebook has enough time to make 'nbserver-*' file
-        time.sleep(2)
+        # Sleep until the notebook makes the 'nbserver-*' file
+        while True:
+            try:
+                next(list_running_servers())
+                break
+            except StopIteration:
+                time.sleep(1)
 
     def _kill_notebook(self):
         if self._notebook_process:
