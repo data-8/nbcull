@@ -1,6 +1,8 @@
 import os
 import subprocess
 import time
+import datetime
+from notebook._tz import utcnow
 from threading import Thread
 from nbcull.culler import Culler, logger
 from jupyter_core.paths import jupyter_runtime_dir
@@ -33,6 +35,9 @@ c.Culler.allowed_inactive_time = 5"""
 
         def condition():
             return os.path.exists(self.TEST_FILE_NAME)
+
+        if not os.path.exists(jupyter_runtime_dir()):
+            os.mkdirs(jupyter_runtime_dir())
 
         self._condition = condition
 
@@ -85,9 +90,26 @@ c.Culler.allowed_inactive_time = 5"""
         assert self._culler._periodic_callback
         self.tearDown()
 
-    def _check_activity(self):
-        if not self._is_user_active:
-            self._shut_down_notebook()
+    def test_check_activity(self):
+        self.setUp()
+
+        class Response:
+            body = None
+        response = Response()
+        response.body = '{{"last_activity": "{}"}}'.format(
+                            utcnow().replace(tzinfo=None).strftime(
+                                self._culler.ACTIVITY_DATE_FORMAT
+                                )
+                            )
+        assert self._culler._check_activity(response) is True
+        response.body = '{{"last_activity": "{}"}}'.format(
+                                (
+                                    utcnow() - datetime.timedelta(0, self._culler.allowed_inactive_time)
+                                ).replace(tzinfo=None).strftime(
+                                    self._culler.ACTIVITY_DATE_FORMAT
+                                )
+                            )
+        assert self._culler._check_activity(response) is False
         self.tearDown()
 
     def test_update_activity_flag(self):
@@ -152,7 +174,7 @@ c.Culler.allowed_inactive_time = 5"""
             'jupyter-notebook',
             '--debug',
             '--no-browser'])
-        # Sleep so that notebook has enough time to make 'nb-server*' file
+        # Sleep so that notebook has enough time to make 'nbserver-*' file
         time.sleep(2)
 
     def _kill_notebook(self):
