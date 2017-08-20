@@ -41,6 +41,9 @@ class Culler(Configurable):
         self._is_updating_flag = False
 
     def _init_config(self):
+        """
+        Merges any traitlets from nbextension/notebook config files
+        """
         c = Config()
         if self._nbapp:
             c.merge(self._nbapp.config)
@@ -49,6 +52,9 @@ class Culler(Configurable):
         self.update_config(c)
 
     def _find_api_status_endpoint(self):
+        """
+        Gets the notebook api status uri
+        """
         self._server = self._get_current_running_server()
         if self._server is not None:
             return url_path_join(
@@ -61,6 +67,9 @@ class Culler(Configurable):
             return None
 
     def start(self):
+        """
+        Starts the callback loop
+        """
         if self._periodic_callback:
             self._periodic_callback.start()
             logger.info('Started runner loop')
@@ -68,6 +77,9 @@ class Culler(Configurable):
             logger.info('Did not start loop: No periodic callback exists.')
 
     def stop(self):
+        """
+        Stops the callback loop
+        """
         if self._periodic_callback:
             self._periodic_callback.stop()
             logger.info('Stopped runner loop')
@@ -75,6 +87,10 @@ class Culler(Configurable):
             logger.info('Did not stop loop: No periodic callback exists.')
 
     def _update_activity_flag(self):
+        """
+        Makes a async api request and updates whether or not
+        the user is active.
+        """
         if self._is_updating_flag:
             return False
         else:
@@ -93,6 +109,11 @@ class Culler(Configurable):
         return True
 
     def _check_activity(self, response):
+        """
+        Returns true if the user's last activity is within the
+        `allowed_inactive_time` in seconds.
+        Returns false otherwise.
+        """
         last_activity = datetime.strptime(
             json.loads(response.body)['last_activity'],
             self.ACTIVITY_DATE_FORMAT
@@ -104,6 +125,10 @@ class Culler(Configurable):
         return seconds_since_last_activity < self.allowed_inactive_time
 
     def _get_current_running_server(self):
+        """
+        Returns the most recently started server's json info.
+        Returns None if no server is running.
+        """
         try:
             return next(list_running_servers())
         except StopIteration:
@@ -111,12 +136,18 @@ class Culler(Configurable):
             return None
 
     def _shut_down_notebook(self):
+        """
+        Shuts down the jupyter notebook and the callback loop.
+        """
         self.stop()
         self._nbapp.stop()
         logger.info("Shutting down notebook because user has been \
 inactive for at least {} seconds.".format(self.allowed_inactive_time))
 
     def _init_periodic_callback(self):
+        """
+        Creates the callback loop
+        """
         def _command_wrapper():
             if self._url is not None:
                 if self._update_activity_flag() and not self._is_user_active:
@@ -130,4 +161,7 @@ inactive for at least {} seconds.".format(self.allowed_inactive_time))
         logger.info('Initialized periodic callback on IOLoop: {}'.format(str(IOLoop.current())))
 
     def _seconds_to_milliseconds(self, seconds):
+        """
+        Converts seconds to milliseconds
+        """
         return seconds * 1000
