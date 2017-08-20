@@ -33,7 +33,7 @@ c.Culler.allowed_inactive_time = 5"""
         self._culler.allowed_inactive_time = self._allowed_inactive_time
 
         if not os.path.exists(jupyter_runtime_dir()):
-            os.mkdirs(jupyter_runtime_dir())
+            os.makedirs(jupyter_runtime_dir())
 
         self._remove_server_files()
 
