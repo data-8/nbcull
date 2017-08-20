@@ -31,13 +31,14 @@ c.Culler.allowed_inactive_time = 5"""
         self._create_test_config_file()
         self._culler = Culler()
         self._culler.allowed_inactive_time = self._allowed_inactive_time
+
+        if not os.path.exists(jupyter_runtime_dir()):
+            os.mkdirs(jupyter_runtime_dir())
+
         self._remove_server_files()
 
         def condition():
             return os.path.exists(self.TEST_FILE_NAME)
-
-        if not os.path.exists(jupyter_runtime_dir()):
-            os.mkdirs(jupyter_runtime_dir())
 
         self._condition = condition
 
