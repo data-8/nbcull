@@ -3,12 +3,13 @@ import subprocess
 import time
 from threading import Thread
 from nbcull.culler import Culler, logger
+from jupyter_core.paths import jupyter_runtime_dir
 
 
 class TestCuller(object):
 
     BUFFER_TIME = 0.8     # in seconds
-    TICK_TIME = 0.2       # in seconds
+    TICK_TIME = 2       # in seconds
     STARTUP_TIMEOUT = 5   # in seconds
     NUM_OF_LOOPS = 3
     TEST_FILE_NAME = "test-file.txt"
@@ -28,6 +29,7 @@ c.Culler.allowed_inactive_time = 5"""
         self._create_test_config_file()
         self._culler = Culler()
         self._culler.allowed_inactive_time = self._allowed_inactive_time
+        self._remove_server_files()
 
         def condition():
             return os.path.exists(self.TEST_FILE_NAME)
@@ -40,33 +42,10 @@ c.Culler.allowed_inactive_time = 5"""
         self._delete_test_config_file()
         self._kill_notebook()
 
-    """
     def test_notebook_install(self):
         self.setUp()
         subprocess.check_call(['pip3', 'install', '--upgrade', '.'])
         subprocess.check_call(['jupyter', 'serverextension', 'enable', '--py', 'nbcull'])
-
-        def run_notebook():
-            try:
-                self._notebook_process = subprocess.Popen([
-                    'jupyter-notebook',
-                    '--debug',
-                    '--no-browser',
-                    '--Culler.periodic_time_interval=1',
-                    '--Culler.allowed_inactive_time={}'.format(self._allowed_inactive_time)])
-            except Exception as e:
-                # ignore any errors the notebook cli throws
-                # b/c it will usually run the notebook anyways
-                # and the errors do not concern nbperiodicrunner
-                pass
-
-        self._command_runs_on_time(
-            self.NUM_OF_LOOPS,
-            run_notebook,
-            self._condition,
-            self._delete_test_file)
-        self.tearDown()
-    """
 
     def test_init_config(self):
         self.setUp()
@@ -106,18 +85,44 @@ c.Culler.allowed_inactive_time = 5"""
         assert self._culler._periodic_callback
         self.tearDown()
 
-    """
-    def test_start(self):
-        self.setUp()
-        assert self._culler.allowed_inactive_time == self._allowed_inactive_time
-
-        def command():
-            self._culler.start()
-
-        self._command_runs_on_time(self.NUM_OF_LOOPS, command, self._condition, self._delete_test_file)
-        assert self._culler.is_running()
+    def _check_activity(self):
+        if not self._is_user_active:
+            self._shut_down_notebook()
         self.tearDown()
-    """
+
+    def test_update_activity_flag(self):
+        self.setUp()
+        self._make_generic_notebook()
+        self._culler._is_updating_flag = True
+        assert self._culler._update_activity_flag() is False
+        self._culler._is_updating_flag = False
+        self._culler._server = self._culler._get_current_running_server()
+        assert self._culler._update_activity_flag() is True
+        self.tearDown()
+
+    def test_get_current_running_server(self):
+        self.setUp()
+        self._make_generic_notebook()
+        assert self._culler._get_current_running_server()['hostname'] == "localhost"
+        self._kill_notebook()
+        assert self._culler._get_current_running_server() is None
+        self.tearDown()
+
+    def test_find_api_status_endpoint(self):
+        self.setUp()
+        self._make_generic_notebook()
+        result = self._culler._find_api_status_endpoint()
+        assert result == "http://localhost:8888/api/status" and self._culler._server is not None
+        self._kill_notebook()
+        result = self._culler._find_api_status_endpoint()
+        assert result is None and self._culler._server is None
+        self.tearDown()
+
+    def _remove_server_files(self):
+        dir_name = jupyter_runtime_dir()
+        for file in os.listdir(dir_name):
+            if file.startswith('nbserver-'):
+                os.remove(os.path.join(dir_name, file))
 
     def _is_within_buffer_time(self, duration):
         return abs(duration - self._culler.periodic_time_interval) < self.BUFFER_TIME
@@ -142,11 +147,20 @@ c.Culler.allowed_inactive_time = 5"""
         self._thread.daemon = True
         self._thread.start()
 
+    def _make_generic_notebook(self):
+        self._notebook_process = subprocess.Popen([
+            'jupyter-notebook',
+            '--debug',
+            '--no-browser'])
+        # Sleep so that notebook has enough time to make 'nb-server*' file
+        time.sleep(2)
+
     def _kill_notebook(self):
         if self._notebook_process:
             subprocess.check_call(['kill', '-9', str(self._notebook_process.pid)])
         else:
             logger.info("No process is set")
+        self._remove_server_files()
 
     def _command_runs_on_time(self, num, command, condition, clean_up):
         self._start_thread(command)

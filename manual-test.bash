@@ -2,4 +2,4 @@
 
 pip3 install --upgrade .
 jupyter serverextension enable --py nbcull
-jupyter-notebook
+jupyter-notebook --no-browser
